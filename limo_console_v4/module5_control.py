@@ -1,0 +1,163 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+模块5：控制方式
+支持键盘和鼠标控制
+"""
+
+import os
+import sys
+import subprocess
+import time
+import signal
+import argparse
+
+def start_control(control_type="keyboard"):
+    """开始控制
+    
+    Args:
+        control_type: 控制类型，可选值：keyboard（键盘）、mouse（鼠标）
+    """
+    print(f"\033[34m[信息] 开始{control_type}控制...\033[0m")
+    
+    processes = []
+    
+    try:
+        # 启动limo_bringup
+        print("\033[34m[信息] 启动limo_bringup...\033[0m")
+        limo_process = subprocess.Popen(
+            ["roslaunch", "limo_bringup", "limo_start.launch"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True
+        )
+        processes.append(limo_process)
+        time.sleep(3)
+        
+        # 根据控制类型启动不同的控制节点
+        if control_type == "keyboard":
+            print("\033[34m[信息] 启动键盘控制...\033[0m")
+            control_process = subprocess.Popen(
+                ["roslaunch", "limo_bringup", "limo_teleop_keyboard.launch"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True
+            )
+            processes.append(control_process)
+            print("\033[34m[信息] 键盘控制已启动，请使用键盘控制LIMO移动\033[0m")
+            print("\033[34m[信息] 控制键说明：\033[0m")
+            print("\033[34m[信息] i: 前进, k: 停止, j: 左转, l: 右转, u: 左前, o: 右前\033[0m")
+            print("\033[34m[信息] ,: 后退, m: 右后, n: 左后\033[0m")
+            print("\033[34m[信息] q/z: 增加/减少最大速度, w/x: 增加/减少角速度\033[0m")
+        elif control_type == "mouse":
+            print("\033[34m[信息] 启动鼠标控制...\033[0m")
+            control_process = subprocess.Popen(
+                ["roslaunch", "limo_bringup", "limo_teleop_mouse.launch"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True
+            )
+            processes.append(control_process)
+            print("\033[34m[信息] 鼠标控制已启动，请使用鼠标控制LIMO移动\033[0m")
+            print("\033[34m[信息] 控制说明：\033[0m")
+            print("\033[34m[信息] 鼠标位置决定移动方向和速度\033[0m")
+            print("\033[34m[信息] 鼠标左键: 前进/转向, 鼠标右键: 停止\033[0m")
+        else:
+            print(f"\033[33m[警告] 未知控制类型: {control_type}，使用默认键盘控制\033[0m")
+            control_process = subprocess.Popen(
+                ["roslaunch", "limo_bringup", "limo_teleop_keyboard.launch"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True
+            )
+            processes.append(control_process)
+        
+        print("\033[34m[信息] 按Ctrl+C结束控制\033[0m")
+        
+        # 等待任意进程结束
+        while all(process.poll() is None for process in processes):
+            time.sleep(1)
+            
+    except KeyboardInterrupt:
+        print("\033[34m[信息] 收到中断信号，正在停止...\033[0m")
+    except Exception as e:
+        print(f"\033[31m[错误] 启动控制时出错: {e}\033[0m")
+    finally:
+        # 终止所有进程
+        for process in processes:
+            if process.poll() is None:
+                try:
+                    process.terminate()
+                    process.wait(timeout=5)
+                except:
+                    process.kill()
+        
+        print("\033[34m[信息] 控制已停止\033[0m")
+
+def stop_all():
+    """结束所有进程"""
+    print("\033[34m[信息] 正在停止所有进程...\033[0m")
+    
+    try:
+        # 查找相关进程
+        ros_processes = subprocess.run(
+            "ps aux | grep -E 'roslaunch|rosrun' | grep -v grep | awk '{print $2}'",
+            shell=True,
+            stdout=subprocess.PIPE,
+            text=True
+        ).stdout.strip().split('\n')
+        
+        # 发送SIGINT信号 (Ctrl+C)
+        for pid in ros_processes:
+            if pid:
+                print(f"\033[34m[信息] 发送终止信号到进程 {pid}\033[0m")
+                try:
+                    os.kill(int(pid), signal.SIGINT)
+                except:
+                    pass
+        
+        # 等待5秒
+        time.sleep(5)
+        
+        # 检查是否有进程仍在运行，如果有则强制终止
+        ros_processes = subprocess.run(
+            "ps aux | grep -E 'roslaunch|rosrun' | grep -v grep | awk '{print $2}'",
+            shell=True,
+            stdout=subprocess.PIPE,
+            text=True
+        ).stdout.strip().split('\n')
+        
+        if ros_processes and ros_processes[0]:
+            print("\033[33m[警告] 一些进程仍在运行，强制终止...\033[0m")
+            for pid in ros_processes:
+                if pid:
+                    try:
+                        os.kill(int(pid), signal.SIGKILL)
+                    except:
+                        pass
+        
+        # 关闭所有终端窗口
+        subprocess.run("pkill -f xterm", shell=True)
+        
+        print("\033[34m[信息] 所有进程已停止\033[0m")
+        
+    except Exception as e:
+        print(f"\033[31m[错误] 停止进程时出错: {e}\033[0m")
+
+def main():
+    """主函数"""
+    parser = argparse.ArgumentParser(description="控制方式模块")
+    parser.add_argument("action", choices=["start", "stop"], help="操作类型")
+    parser.add_argument("control_type", nargs="?", default="keyboard", 
+                        choices=["keyboard", "mouse"], 
+                        help="控制类型（仅在start操作时有效）")
+    
+    args = parser.parse_args()
+    
+    if args.action == "start":
+        start_control(args.control_type)
+    elif args.action == "stop":
+        stop_all()
+
+if __name__ == "__main__":
+    main()
